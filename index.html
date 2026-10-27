@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1b5fc1">
+<meta name="description" content="Lecteur de fichiers PDF et Word (.docx), utilisable sans internet.">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>SEPPO BCL</title>
+<style>
+  :root {
+    --bg: #eef1f5;
+    --surface: #ffffff;
+    --ink: #17202c;
+    --muted: #5d6b7c;
+    --line: #d5dce5;
+    --accent: #1b5fc1;
+    --accent-ink: #ffffff;
+    --error-bg: #fdecec;
+    --error-ink: #8a1f1f;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161d;
+      --surface: #1a212b;
+      --ink: #e6ebf2;
+      --muted: #9aa8ba;
+      --line: #2e3947;
+      --accent: #6aa3f5;
+      --accent-ink: #0c1420;
+      --error-bg: #3a1c1c;
+      --error-ink: #f3b4b4;
+      color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    display: flex;
+    flex-direction: column;
+  }
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--line);
+    padding: 10px 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .title {
+    flex: 1 1 140px;
+    min-width: 0;
+    font-size: 15px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .title small { display: block; font-weight: 400; color: var(--muted); font-size: 12px; }
+  button, .btn {
+    font: inherit;
+    font-size: 14px;
+    border: 1px solid var(--line);
+    background: var(--surface);
+    color: var(--ink);
+    padding: 8px 12px;
+    border-radius: 8px;
+    cursor: pointer;
+    min-height: 40px;
+  }
+  button:hover, .btn:hover { border-color: var(--accent); }
+  button:focus-visible, .btn:focus-visible, .drop:focus-visible {
+    outline: 3px solid var(--accent);
+    outline-offset: 2px;
+  }
+  .primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); font-weight: 600; }
+  .tools { display: none; gap: 6px; align-items: center; }
+  .tools.on { display: flex; }
+  .tools span { font-size: 13px; color: var(--muted); min-width: 44px; text-align: center; }
+  main { flex: 1; overflow: auto; padding: 14px; -webkit-overflow-scrolling: touch; }
+
+  .drop {
+    max-width: 520px;
+    margin: 8vh auto 0;
+    border: 2px dashed var(--line);
+    border-radius: 14px;
+    padding: 36px 22px;
+    text-align: center;
+    background: var(--surface);
+  }
+  .drop.over { border-color: var(--accent); }
+  .drop h1 { font-size: 20px; margin: 0 0 8px; }
+  .drop p { color: var(--muted); margin: 0 0 20px; font-size: 14px; line-height: 1.5; }
+
+  #pdfView { display: flex; flex-direction: column; align-items: center; gap: 12px; }
+  #pdfView .page {
+    background: #fff;
+    box-shadow: 0 1px 4px rgba(0,0,0,.25);
+    max-width: none;
+  }
+  #pdfView canvas { display: block; }
+
+  #docView {
+    max-width: 720px;
+    margin: 0 auto;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 22px 20px;
+    font-family: Georgia, "Times New Roman", serif;
+    line-height: 1.65;
+    overflow-wrap: anywhere;
+  }
+  #docView img { max-width: 100%; height: auto; }
+  #docView table { border-collapse: collapse; max-width: 100%; display: block; overflow-x: auto; }
+  #docView td, #docView th { border: 1px solid var(--line); padding: 6px 8px; }
+  #docView h1, #docView h2, #docView h3 { line-height: 1.25; }
+
+  .msg { max-width: 520px; margin: 14px auto 0; padding: 12px 14px; border-radius: 10px; font-size: 14px; line-height: 1.5; }
+  .msg.error { background: var(--error-bg); color: var(--error-ink); }
+  .msg.info { background: var(--surface); border: 1px solid var(--line); color: var(--muted); text-align: center; }
+  .hidden { display: none !important; }
+  @media (prefers-reduced-motion: no-preference) { button { transition: border-color .15s; } }
+</style>
+</head>
+<body>
+<header>
+  <div class="title" id="title">SEPPO BCL<small>Lecteur PDF et Word (.docx)</small></div>
+  <div class="tools" id="tools">
+    <button id="minus" aria-label="Réduire le texte ou le zoom">−</button>
+    <span id="level">100 %</span>
+    <button id="plus" aria-label="Agrandir le texte ou le zoom">+</button>
+  </div>
+  <label class="btn primary" for="file" tabindex="0" id="openBtn">Ouvrir un fichier</label>
+  <input id="file" type="file" class="hidden"
+    accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document">
+</header>
+
+<main id="main">
+  <div class="drop" id="drop" tabindex="0" role="button" aria-label="Choisir un fichier à ouvrir">
+    <h1>Ouvre un document</h1>
+    <p>Choisis un fichier PDF ou Word (.docx) sur ton téléphone ou ton ordinateur. Le fichier reste sur ton appareil, il n'est envoyé nulle part.</p>
+    <span class="btn primary">Choisir un fichier</span>
+  </div>
+  <div id="status"></div>
+  <div id="pdfView" class="hidden"></div>
+  <article id="docView" class="hidden"></article>
+</main>
+
+<script src="pdf.min.js"></script>
+<script src="mammoth.browser.min.js"></script>
+<script>
+  const $ = id => document.getElementById(id);
+  const fileInput = $('file'), drop = $('drop'), status = $('status');
+  const pdfView = $('pdfView'), docView = $('docView'), tools = $('tools');
+  let mode = null;        // 'pdf' | 'docx'
+  let zoom = 1;           // PDF: multiplicateur de largeur
+  let fontPx = 17;        // Word: taille du texte
+  let pdfDoc = null;
+  let observer = null;
+
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'pdf.worker.min.js';
+  }
+
+  function showMessage(text, type) {
+    status.innerHTML = '';
+    if (!text) return;
+    const d = document.createElement('div');
+    d.className = 'msg ' + type;
+    d.textContent = text;
+    status.appendChild(d);
+  }
+
+  function setTitle(name, detail) {
+    const t = $('title');
+    t.textContent = name;
+    const s = document.createElement('small');
+    s.textContent = detail;
+    t.appendChild(s);
+  }
+
+  function reset() {
+    if (observer) { observer.disconnect(); observer = null; }
+    pdfView.innerHTML = '';
+    docView.innerHTML = '';
+    pdfView.classList.add('hidden');
+    docView.classList.add('hidden');
+    drop.classList.add('hidden');
+    tools.classList.remove('on');
+    pdfDoc = null;
+    mode = null;
+  }
+
+  function updateLevel() {
+    $('level').textContent = mode === 'pdf'
+      ? Math.round(zoom * 100) + ' %'
+      : fontPx + ' px';
+  }
+
+  async function handleFile(file) {
+    if (!file) return;
+    const name = file.name.toLowerCase();
+    reset();
+    if (name.endsWith('.pdf')) {
+      await openPdf(file);
+    } else if (name.endsWith('.docx')) {
+      await openDocx(file);
+    } else if (name.endsWith('.doc')) {
+      drop.classList.remove('hidden');
+      showMessage("Le format Word ancien (.doc) n'est pas pris en charge. Ouvre le fichier dans Word et enregistre-le en .docx, puis réessaie.", 'error');
+    } else {
+      drop.classList.remove('hidden');
+      showMessage('Format non pris en charge. Choisis un fichier .pdf ou .docx.', 'error');
+    }
+  }
+
+  async function openPdf(file) {
+    if (!window.pdfjsLib) {
+      drop.classList.remove('hidden');
+      showMessage("Le lecteur PDF n'a pas pu se charger. Vérifie ta connexion internet et recharge la page.", 'error');
+      return;
+    }
+    showMessage('Ouverture du PDF…', 'info');
+    try {
+      const data = await file.arrayBuffer();
+      pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+      mode = 'pdf';
+      zoom = 1;
+      setTitle(file.name, pdfDoc.numPages + (pdfDoc.numPages > 1 ? ' pages' : ' page'));
+      tools.classList.add('on');
+      pdfView.classList.remove('hidden');
+      showMessage('', '');
+      updateLevel();
+      await buildPdfPages();
+    } catch (e) {
+      reset();
+      drop.classList.remove('hidden');
+      const locked = e && e.name === 'PasswordException';
+      showMessage(locked
+        ? 'Ce PDF est protégé par un mot de passe. Cette version ne peut pas l\'ouvrir.'
+        : "Impossible d'ouvrir ce PDF. Le fichier est peut-être corrompu.", 'error');
+    }
+  }
+
+  async function buildPdfPages() {
+    if (observer) observer.disconnect();
+    pdfView.innerHTML = '';
+    const avail = Math.min(document.getElementById('main').clientWidth - 28, 900);
+    const width = avail * zoom;
+    observer = new IntersectionObserver(entries => {
+      entries.forEach(en => {
+        if (en.isIntersecting && !en.target.dataset.done) {
+          en.target.dataset.done = '1';
+          renderPage(en.target);
+        }
+      });
+    }, { root: $('main'), rootMargin: '600px 0px' });
+
+    for (let n = 1; n <= pdfDoc.numPages; n++) {
+      const page = await pdfDoc.getPage(n);
+      const base = page.getViewport({ scale: 1 });
+      const scale = width / base.width;
+      const vp = page.getViewport({ scale });
+      const box = document.createElement('div');
+      box.className = 'page';
+      box.style.width = vp.width + 'px';
+      box.style.height = vp.height + 'px';
+      box.dataset.n = n;
+      box.dataset.scale = scale;
+      pdfView.appendChild(box);
+      observer.observe(box);
+    }
+  }
+
+  async function renderPage(box) {
+    const page = await pdfDoc.getPage(Number(box.dataset.n));
+    const scale = Number(box.dataset.scale);
+    const ratio = window.devicePixelRatio || 1;
+    const vp = page.getViewport({ scale: scale * ratio });
+    const canvas = document.createElement('canvas');
+    canvas.width = vp.width;
+    canvas.height = vp.height;
+    canvas.style.width = (vp.width / ratio) + 'px';
+    canvas.style.height = (vp.height / ratio) + 'px';
+    box.appendChild(canvas);
+    await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+  }
+
+  async function openDocx(file) {
+    if (!window.mammoth) {
+      drop.classList.remove('hidden');
+      showMessage("Le lecteur Word n'a pas pu se charger. Vérifie ta connexion internet et recharge la page.", 'error');
+      return;
+    }
+    showMessage('Ouverture du document…', 'info');
+    try {
+      const arrayBuffer = await file.arrayBuffer();
+      const result = await mammoth.convertToHtml({ arrayBuffer });
+      mode = 'docx';
+      docView.innerHTML = result.value || '<p>Ce document ne contient pas de texte.</p>';
+      docView.style.fontSize = fontPx + 'px';
+      docView.classList.remove('hidden');
+      tools.classList.add('on');
+      setTitle(file.name, 'Document Word');
+      showMessage(result.messages.length
+        ? 'Certains éléments (mise en page avancée) peuvent ne pas s\'afficher comme dans Word.'
+        : '', 'info');
+      updateLevel();
+    } catch (e) {
+      reset();
+      drop.classList.remove('hidden');
+      showMessage("Impossible d'ouvrir ce fichier Word. Il est peut-être corrompu.", 'error');
+    }
+  }
+
+  function change(dir) {
+    if (mode === 'pdf') {
+      const next = Math.min(3, Math.max(0.5, +(zoom + dir * 0.25).toFixed(2)));
+      if (next === zoom) return;
+      zoom = next;
+      updateLevel();
+      buildPdfPages();
+    } else if (mode === 'docx') {
+      fontPx = Math.min(30, Math.max(12, fontPx + dir * 2));
+      docView.style.fontSize = fontPx + 'px';
+      updateLevel();
+    }
+  }
+
+  $('plus').addEventListener('click', () => change(1));
+  $('minus').addEventListener('click', () => change(-1));
+  fileInput.addEventListener('change', e => { handleFile(e.target.files[0]); fileInput.value = ''; });
+  drop.addEventListener('click', () => fileInput.click());
+  drop.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+  $('openBtn').addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); } });
+  ['dragover', 'dragenter'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(ev => document.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove('over'); }));
+  document.addEventListener('drop', e => handleFile(e.dataTransfer.files[0]));
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('sw.js').catch(() => {});
+    });
+  }
+</script>
+</body>
+</html>
